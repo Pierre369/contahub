@@ -1,5 +1,5 @@
 -- ============================================
--- MIGRACAO.SQL - ContaHub Marketplace
+-- MIGRACAO.SQL - ContaHub Marketplace - FASE 1
 -- Rodar no SQL Editor do Supabase
 -- ============================================
 
@@ -11,7 +11,8 @@ DECLARE
   user_email text;
 BEGIN
   user_email := auth.jwt()->>'email';
-  RETURN user_email = 'SEU_EMAIL_AQUI@EXEMPLO.COM'; -- <-- COLOQUE SEU EMAIL AQUI
+  -- IMPORTANTE: Troque 'admin@contahub.com.br' pelo seu email real
+  RETURN user_email = 'admin@contahub.com.br';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -94,7 +95,7 @@ BEGIN
   -- Só processa se mudou para 'entregue'
   IF OLD.status IS DISTINCT FROM NEW.status AND NEW.status = 'entregue' AND NEW.listing_id IS NOT NULL THEN
     -- Buscar seller da listing
-    SELECT seller INTO seller_id FROM public.listings WHERE id = NEW.listing_id;
+    SELECT user_id INTO seller_id FROM public.listings WHERE id = NEW.listing_id;
     
     IF seller_id IS NOT NULL THEN
       -- Calcular 90% do valor_item
@@ -102,7 +103,8 @@ BEGIN
       
       -- Creditar na conta do seller
       UPDATE public.profiles 
-      SET saldo = COALESCE(saldo, 0) + valor_credito
+      SET saldo = COALESCE(saldo, 0) + valor_credito,
+          updated_at = now()
       WHERE id = seller_id;
     END IF;
   END IF;
@@ -190,36 +192,199 @@ CREATE POLICY reports_admin_update ON public.reports
   WITH CHECK (public.is_admin());
 
 -- ===== ORDERS =====
--- Buyer pode atualizar status dos próprios pedidos para 'entregue' ou 'disputa'
-CREATE POLICY orders_buyer_update_status ON public.orders
-  FOR UPDATE TO authenticated
-  USING (auth.uid() = buyer AND status IN ('pago', 'pendente'))
-  WITH CHECK (status IN ('pago', 'pendente', 'entregue', 'disputa'));
+-- Select: usuário vê seus próprios pedidos ou se for seller da listing, admin vê tudo
+DROP POLICY IF EXISTS orders_select_own_or_admin ON public.orders;
+CREATE POLICY orders_select_own_or_admin ON public.orders
+  FOR SELECT TO authenticated
+  USING (
+    auth.uid() = buyer_id 
+    OR auth.uid() IN (SELECT user_id FROM public.listings WHERE id = orders.listing_id)
+    OR public.is_admin()
+  );
 
--- Admin pode selecionar e atualizar tudo em orders
-CREATE POLICY orders_admin_all ON public.orders
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
+-- Insert: apenas usuário autenticado pode criar pedido (como comprador)
+DROP POLICY IF EXISTS orders_insert_auth ON public.orders;
+CREATE POLICY orders_insert_auth ON public.orders
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = buyer_id);
+
+-- Update: comprador pode mudar para 'entregue' ou 'disputa', admin pode tudo
+DROP POLICY IF EXISTS orders_update_buyer_or_admin ON public.orders;
+CREATE POLICY orders_update_buyer_or_admin ON public.orders
+  FOR UPDATE TO authenticated
+  USING (
+    (auth.uid() = buyer_id AND NEW.status IN ('entregue', 'disputa'))
+    OR public.is_admin()
+  )
+  WITH CHECK (
+    (auth.uid() = buyer_id AND NEW.status IN ('entregue', 'disputa'))
+    OR public.is_admin()
+  );
 
 -- ===== WITHDRAWALS =====
--- Admin pode selecionar e atualizar withdrawals
-CREATE POLICY withdrawals_admin_all ON public.withdrawals
-  FOR ALL TO authenticated
+-- Select: usuário vê seus saques, admin vê tudo
+DROP POLICY IF EXISTS withdrawals_select_own_or_admin ON public.withdrawals;
+CREATE POLICY withdrawals_select_own_or_admin ON public.withdrawals
+  FOR SELECT TO authenticated
+  USING (auth.uid() = user_id OR public.is_admin());
+
+-- Insert: apenas usuário autenticado pode solicitar saque
+DROP POLICY IF EXISTS withdrawals_insert_auth ON public.withdrawals;
+CREATE POLICY withdrawals_insert_auth ON public.withdrawals
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+-- Update: apenas admin pode atualizar status de saques
+DROP POLICY IF EXISTS withdrawals_update_admin ON public.withdrawals;
+CREATE POLICY withdrawals_update_admin ON public.withdrawals
+  FOR UPDATE TO authenticated
   USING (public.is_admin())
   WITH CHECK (public.is_admin());
 
 -- ===== LISTINGS =====
--- Admin pode remover/editar qualquer listing
-CREATE POLICY listings_admin_all ON public.listings
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
+-- Select: todos podem ver anúncios ativos, admin vê tudo
+DROP POLICY IF EXISTS listings_select_active_or_admin ON public.listings;
+CREATE POLICY listings_select_active_or_admin ON public.listings
+  FOR SELECT TO public
+  USING (status = 'ativo' OR public.is_admin());
+
+-- Insert: apenas usuários autenticados podem criar anúncios
+DROP POLICY IF EXISTS listings_insert_auth ON public.listings;
+CREATE POLICY listings_insert_auth ON public.listings
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+-- Update: dono pode editar se não estiver vendido, admin pode tudo
+DROP POLICY IF EXISTS listings_update_owner_or_admin ON public.listings;
+CREATE POLICY listings_update_owner_or_admin ON public.listings
+  FOR UPDATE TO authenticated
+  USING (
+    (auth.uid() = user_id AND status != 'vendido')
+    OR public.is_admin()
+  )
+  WITH CHECK (
+    (auth.uid() = user_id AND status != 'vendido')
+    OR public.is_admin()
+  );
+
+-- Delete: apenas admin pode remover anúncios
+DROP POLICY IF EXISTS listings_delete_admin ON public.listings;
+CREATE POLICY listings_delete_admin ON public.listings
+  FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+-- ===== PROFILES =====
+-- Select: público pode ver perfis básicos
+DROP POLICY IF EXISTS profiles_select_public ON public.profiles;
+CREATE POLICY profiles_select_public ON public.profiles
+  FOR SELECT TO public
+  USING (true);
+
+-- Update: usuário pode atualizar seu próprio perfil, admin pode tudo
+DROP POLICY IF EXISTS profiles_update_own_or_admin ON public.profiles;
+CREATE POLICY profiles_update_own_or_admin ON public.profiles
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = id OR public.is_admin())
+  WITH CHECK (auth.uid() = id OR public.is_admin());
 
 -- ============================================
 -- ÍNDICES PARA PERFORMANCE
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_reviews_listing ON public.reviews(listing_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_reviewer ON public.reviews(reviewer);
 CREATE INDEX IF NOT EXISTS idx_disputes_order ON public.disputes(order_id);
+CREATE INDEX IF NOT EXISTS idx_disputes_buyer ON public.disputes(buyer);
 CREATE INDEX IF NOT EXISTS idx_reports_listing ON public.reports(listing_id);
+CREATE INDEX IF NOT EXISTS idx_reports_reporter ON public.reports(reporter);
 CREATE INDEX IF NOT EXISTS idx_orders_listing ON public.orders(listing_id);
+
+-- ============================================================================
+-- FUNÇÕES AUXILIARES PARA O FRONTEND
+-- ============================================================================
+
+-- Função para calcular média de avaliações de uma listing
+CREATE OR REPLACE FUNCTION public.get_listing_rating(p_listing_id uuid)
+RETURNS TABLE (
+  media_nota numeric,
+  total_avaliacoes bigint
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    COALESCE(AVG(r.nota), 0)::numeric AS media_nota,
+    COUNT(*)::bigint AS total_avaliacoes
+  FROM public.reviews r
+  WHERE r.listing_id = p_listing_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Função para obter estatísticas do vendedor
+CREATE OR REPLACE FUNCTION public.get_seller_stats(p_user_id uuid)
+RETURNS TABLE (
+  data_cadastro timestamptz,
+  total_vendas_entregues bigint,
+  media_avaliacoes numeric
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    p.criado_em AS data_cadastro,
+    (
+      SELECT COUNT(*) 
+      FROM public.orders o
+      JOIN public.listings l ON o.listing_id = l.id
+      WHERE l.user_id = p_user_id 
+        AND o.status = 'entregue'
+    )::bigint AS total_vendas_entregues,
+    (
+      SELECT COALESCE(AVG(r.nota), 0)
+      FROM public.reviews r
+      JOIN public.listings l ON r.listing_id = l.id
+      WHERE l.user_id = p_user_id
+    )::numeric AS media_avaliacoes
+  FROM public.profiles p
+  WHERE p.id = p_user_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Função para calcular saldo pendente do vendedor
+CREATE OR REPLACE FUNCTION public.get_seller_pending_balance(p_user_id uuid)
+RETURNS numeric AS $$
+DECLARE
+  pending numeric;
+BEGIN
+  SELECT COALESCE(SUM(o.valor_item * 0.90), 0)
+  INTO pending
+  FROM public.orders o
+  JOIN public.listings l ON o.listing_id = l.id
+  WHERE l.user_id = p_user_id
+    AND o.status IN ('pago', 'disputa');
+  
+  RETURN pending;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Função para calcular receita total do admin (10% de comissão)
+CREATE OR REPLACE FUNCTION public.get_admin_revenue()
+RETURNS numeric AS $$
+DECLARE
+  revenue numeric;
+BEGIN
+  SELECT COALESCE(SUM(valor_item * 0.10), 0)
+  INTO revenue
+  FROM public.orders
+  WHERE status = 'entregue';
+  
+  RETURN revenue;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================================
+-- FIM DA MIGRAÇÃO - FASE 1
+-- ============================================================================
+
+DO $$
+BEGIN
+  RAISE NOTICE 'Migração ContaHub Fase 1 concluída com sucesso!';
+  RAISE NOTICE 'IMPORTANTE: Substitua o email em is_admin() pelo seu email real antes de usar.';
+END $$;
