@@ -832,9 +832,29 @@ function buildCard(p){
 }
 function renderProducts(){var l=filtered();$('#countLabel').textContent=l.length+' conta'+(l.length===1?'':'s')+' encontrada'+(l.length===1?'':'s');$('#prodGrid').innerHTML=l.length?l.map(buildCard).join(''):'<div class="empty">'+icon('search')+'<h3>Nenhuma conta encontrada</h3></div>'}
 function toggleFav(id){if(state.favs[id])delete state.favs[id];else state.favs[id]=1;var n=Object.keys(state.favs).length;$('#favCount').textContent=n;$('#favCount').classList.toggle('hidden',n===0);renderProducts()}
-function openProduct(id){
+async function openProduct(id){
   var p=state.products.find(function(x){return x.id===id});if(!p)return
-  $('#pmBody').innerHTML='<div class="pm-left"><div class="pmimg"><img src="'+(CATIMG[p.categoria]||IMG.tt)+'"></div><h2>'+esc(p.titulo)+'</h2><div class="pm-seller"><i style="background:'+p.sellerColor+'">'+p.sellerName[0]+'</i><div><b>'+esc(p.sellerName)+'</b><small>★ '+(p.rating||5)+' · vendedor</small></div></div><p class="pm-desc">'+esc(p.descricao||'')+'</p><div class="spec-table">'+(p.specs||[]).map(function(s){return '<div><small>'+esc(s[0])+'</small><b>'+esc(s[1])+'</b></div>'}).join('')+'</div><div class="guar-box"><h4>'+icon('shield')+' Compra 100% protegida</h4><ul><li>'+icon('check')+' Valor retido em Escrow até a entrega</li><li>'+icon('check')+' Garantia de 7 dias</li><li>'+icon('check')+' Reembolso integral</li></ul></div></div><div class="pm-right"><div class="buybox">'+(p.old?'<span style="color:var(--mut);font-size:13px">De <s>'+fmt(p.old)+'</s></span>':'')+'<div class="big">'+fmt(p.preco)+'</div><div class="inst">12x de '+fmt(p.preco/12)+' · PIX imediato</div><button class="btn btn-ink" onclick="buyNow(\''+p.id+'\')">'+icon('bolt')+' Comprar agora</button><button class="btn btn-ghost" onclick="addToCart(\''+p.id+'\')">'+icon('cart')+' Adicionar ao carrinho</button><button class="btn btn-soft" onclick="openChat(\''+p.id+'\')">'+icon('msg')+' Conversar com vendedor</button><ul class="meta"><li>'+icon('lock')+' Pagamento via Mercado Pago</li><li>'+icon('clock')+' '+(p.instant?'Entrega em minutos':'Entrega em até 2h')+'</li><li>'+icon('shield')+' Escrow 7 dias</li></ul></div></div>'
+  // Busca avaliações da listing
+  var mediaAval=0,totalAval=0
+  if(SB_OK){
+    var rRev=await sb.from('reviews').select('nota').eq('listing_id',id)
+    if(rRev.data&&rRev.data.length){
+      var soma=0;rRev.data.forEach(function(r){soma+=r.nota})
+      mediaAval=(soma/rRev.data.length).toFixed(1)
+      totalAval=rRev.data.length
+    }
+  }
+  // Busca stats do vendedor
+  var regVend='-',vendasEntregues=0,mediaVend=0
+  if(SB_OK){
+    var rSeller=await sb.rpc('get_seller_stats',{p_user_id:p.sellerId||null}).single()
+    if(rSeller.data){
+      regVend=new Date(rSeller.data.data_cadastro).toLocaleDateString('pt-BR')
+      vendasEntregues=rSeller.data.vendas_entregues||0
+      mediaVend=rSeller.data.media_avaliacoes?parseFloat(rSeller.data.media_avaliacoes).toFixed(1):0
+    }
+  }
+  $('#pmBody').innerHTML='<div class="pm-left"><div class="pmimg"><img src="'+(CATIMG[p.categoria]||IMG.tt)+'"></div><h2>'+esc(p.titulo)+'</h2><div class="pm-seller"><i style="background:'+p.sellerColor+'">'+p.sellerName[0]+'</i><div><b>'+esc(p.sellerName)+'</b><small>★ '+(mediaVend||5)+' · '+vendasEntregues+' vendas entregues</small><br><small style="color:var(--mut)">Cadastrado em '+regVend+'</small></div></div><div style="margin:14px 0;padding:14px;background:var(--bg);border-radius:12px"><h4 style="font-size:13px;margin-bottom:8px">Avaliações ('+totalAval+')</h4>'+(totalAval>0?'<div style="display:flex;align-items:center;gap:6px;font-size:18px;font-weight:700;color:var(--warn)"><span>★</span><span>'+mediaAval+'/5</span></div>':'<small style="color:var(--mut)">Sem avaliações ainda</small>')+'</div><p class="pm-desc">'+esc(p.descricao||'')+'</p><div class="spec-table">'+(p.specs||[]).map(function(s){return '<div><small>'+esc(s[0])+'</small><b>'+esc(s[1])+'</b></div>'}).join('')+'</div><div class="guar-box"><h4>'+icon('shield')+' Compra 100% protegida</h4><ul><li>'+icon('check')+' Valor retido em Escrow até a entrega</li><li>'+icon('check')+' Garantia de 7 dias</li><li>'+icon('check')+' Reembolso integral</li></ul></div></div><div class="pm-right"><div class="buybox">'+(p.old?'<span style="color:var(--mut);font-size:13px">De <s>'+fmt(p.old)+'</s></span>':'')+'<div class="big">'+fmt(p.preco)+'</div><div class="inst">12x de '+fmt(p.preco/12)+' · PIX imediato</div><button class="btn btn-ink" onclick="buyNow(\''+p.id+'\')">'+icon('bolt')+' Comprar agora</button><button class="btn btn-ghost" onclick="addToCart(\''+p.id+'\')">'+icon('cart')+' Adicionar ao carrinho</button><button class="btn btn-soft" onclick="openChat(\''+p.id+'\')">'+icon('msg')+' Conversar com vendedor</button><button class="btn btn-ghost" style="color:var(--err);margin-top:8px" onclick="denunciarAnuncio(\''+p.id+'\',\''+esc(p.titulo)+'\')">'+icon('alert')+' Denunciar anúncio</button><ul class="meta"><li>'+icon('lock')+' Pagamento via Mercado Pago</li><li>'+icon('clock')+' '+(p.instant?'Entrega em minutos':'Entrega em até 2h')+'</li><li>'+icon('shield')+' Escrow 7 dias</li></ul></div></div>'
   openModal('productModal')
 }
 
@@ -950,9 +970,16 @@ async function renderOrders(){
     if(st>=3){var n=1000+rnd(8999);creds='<div class="creds" id="cr-'+o.id+'"><h5>'+icon('lock')+' CREDENCIAIS</h5><div class="crow"><small>Login</small><code>cliente'+n+'@contahub.app</code><button onclick="copyText(\'cliente'+n+'@contahub.app\')">'+icon('copy')+'</button></div><div class="crow"><small>Senha</small><code>Hub#'+Math.random().toString(36).slice(2,10)+'!</code></div><button class="btn btn-soft" style="padding:7px 12px;font-size:12px" onclick="document.getElementById(\'cr-'+o.id+'\').classList.toggle(\'show\')">'+icon('eye')+' Mostrar</button><p class="warn">⚠ Troque senha e recuperação após o login.</p></div>'}
     var acts=''
     if(st===0)acts='<button class="btn btn-soft" style="padding:8px 14px;font-size:12px" onclick="state.stages[\''+o.id+'\']=1;scheduleStages(\''+o.id+'\',false);renderOrders()">Simular compensação</button>'
-    if(st===3)acts='<button class="btn btn-ink" style="padding:8px 14px;font-size:12px" onclick="state.stages[\''+o.id+'\']=4;renderOrders();toast(\'Recebimento confirmado 🤝\')">Confirmar recebimento</button>'
-    if(st===4)acts='<button class="btn btn-ghost" style="padding:8px 14px;font-size:12px" onclick="toast(\'Avaliação registrada ⭐\')">Avaliar</button>'
-    return '<div class="order"><div class="ohead"><b>'+esc(o.titulo)+'</b><small>'+new Date(o.criado_em).toLocaleDateString('pt-BR')+' · '+esc(o.metodo)+'</small><span class="ostatus s'+st+'">'+stTxt+'</span></div><ol class="tl">'+tl+'</ol><div class="oitems"><span style="font-weight:700">'+fmt(o.valor)+'</span></div>'+creds+(acts?'<div>'+acts+'</div>':'')+'</div>'
+    if(st===3 && o.status!=='entregue'){
+      acts='<button class="btn btn-ink" style="padding:8px 14px;font-size:12px;margin-right:8px" onclick="confirmarRecebimento(\''+o.id+'\')">Confirmar recebimento</button>'
+    }
+    if((st===3 || o.status==='entregue') && !o.avaliado){
+      acts+='<button class="btn btn-ghost" style="padding:8px 14px;font-size:12px" onclick="abrirAvaliacao(\''+o.id+'\',\''+o.listing_id+'\')">Avaliar</button>'
+    }
+    if(o.status==='pago' || o.status==='entregue'){
+      acts+='<button class="btn btn-ghost" style="padding:8px 14px;font-size:12px;color:var(--warn)" onclick="abrirDisputa(\''+o.id+'\',\''+o.listing_id+'\')">Abrir disputa</button>'
+    }
+    return '<div class="order"><div class="ohead"><b>'+esc(o.titulo)+'</b><small>'+new Date(o.criado_em).toLocaleDateString('pt-BR')+' · '+esc(o.metodo)+'</small><span class="ostatus s'+st+'">'+stTxt+'</span></div><ol class="tl">'+tl+'</ol><div class="oitems"><span style="font-weight:700">'+fmt(o.valor)+'</span></div>'+creds+(acts?'<div style="margin-top:12px">'+acts+'</div>':'')+'</div>'
   }).join('')
 }
 async function renderMeusAnuncios(){
@@ -967,6 +994,60 @@ async function renderMeusAnuncios(){
     return '<div class="sale"><img src="'+(CATIMG[l.categoria]||IMG.tt)+'"><div><b>'+esc(l.titulo)+'</b><small>'+fmt(l.preco)+' · '+statusBadge+'</small></div><div class="acts">'+(canEdit?'<button class="btn btn-ghost" style="padding:8px 12px;font-size:12px" onclick="closeModal(\'dashModal\');openProduct(\''+l.id+'\')">Ver</button>':'<button class="btn btn-ghost" style="padding:8px 12px;font-size:12px" disabled>Vendido</button>')+'<button class="btn btn-ghost" style="padding:8px 12px;font-size:12px;color:var(--err)" onclick="removeListing(\''+l.id+'\')">'+icon('trash')+'</button></div></div>'}).join('')
 }
 async function removeListing(id){await sb.from('listings').delete().eq('id',id);toast('Anúncio removido','warn');loadProducts();renderMeusAnuncios()}
+
+// FASE 3: Funções do Comprador - Confirmar recebimento, Disputa, Avaliação
+async function confirmarRecebimento(orderId){
+  if(!confirm('Confirmar que recebeu a conta? Isso liberará o pagamento ao vendedor.'))return
+  var r=await sb.from('orders').update({status:'entregue'}).eq('id',orderId)
+  if(r.error){toast(r.error.message,'err');return}
+  toast('Recebimento confirmado! 🎉 Saldo do vendedor liberado.')
+  renderOrders()
+}
+
+async function abrirDisputa(orderId, listingId){
+  var motivo=prompt('Motivo da disputa (obrigatório):')
+  if(!motivo || motivo.trim().length<5){toast('Descreva o motivo da disputa (mínimo 5 caracteres)','err');return}
+  // Atualiza pedido para status disputa
+  var rOrder=await sb.from('orders').update({status:'disputa'}).eq('id',orderId)
+  if(rOrder.error){toast(rOrder.error.message,'err');return}
+  // Busca seller da listing
+  var rList=await sb.from('listings').select('seller').eq('id',listingId).single()
+  var sellerId=rList.data?rList.data.seller:null
+  // Insert na tabela disputes
+  var rDisp=await sb.from('disputes').insert({order_id:orderId,buyer:user.id,motivo:motivo.trim(),seller_id:sellerId})
+  if(rDisp.error){toast(rDisp.error.message,'err');return}
+  toast('Disputa aberta! ⚠️ Analisaremos em até 48h.')
+  renderOrders()
+}
+
+async function abrirAvaliacao(orderId, listingId){
+  // Modal simples de avaliação via prompt não funciona bem, vamos usar um modal customizado
+  // Por simplicidade, faremos via prompt de nota e texto
+  var notaStr=prompt('Nota de 1 a 5 estrelas:')
+  if(!notaStr)return
+  var nota=parseInt(notaStr)
+  if(isNaN(nota)||nota<1||nota>5){toast('Nota inválida (1-5)','err');return}
+  var texto=prompt('Comentário opcional sobre sua compra:')||''
+  // Busca seller da listing
+  var rList=await sb.from('listings').select('seller').eq('id',listingId).single()
+  var sellerId=rList.data?rList.data.seller:null
+  // Insert na tabela reviews
+  var rRev=await sb.from('reviews').insert({listing_id:listingId,order_id:orderId,reviewer:user.id,seller_id:sellerId,nota:nota,texto:texto})
+  if(rRev.error){toast(rRev.error.message,'err');return}
+  // Marca pedido como avaliado (campo customizado ou apenas toast)
+  toast('Avaliação registrada! ⭐ Obrigado.')
+  renderOrders()
+}
+
+async function denunciarAnuncio(listingId,titulo){
+  if(!requireAuth())return
+  var motivo=prompt('Motivo da denúncia (obrigatório):\nEx: Conteúdo falso, golpe, proibido, etc.')
+  if(!motivo || motivo.trim().length<5){toast('Descreva o motivo (mínimo 5 caracteres)','err');return}
+  var r=await sb.from('reports').insert({listing_id:listingId,reporter:user.id,motivo:motivo.trim()})
+  if(r.error){toast(r.error.message,'err');return}
+  toast('Denúncia enviada! 🔍 Analisaremos em até 24h.')
+  closeModal('productModal')
+}
 
 // FASE 2: Minhas Vendas (pedidos das minhas listings) e Carteira com saldo disponível/pendente
 async function renderMinhasVendas(){
