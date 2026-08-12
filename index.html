@@ -632,7 +632,8 @@ footer{border-top:1px solid var(--line);background:var(--bg2);padding:52px 0 26p
     <div class="dtabs">
       <button id="dt-compras" class="on" onclick="dashTab('compras')">Compras</button>
       <button id="dt-vendas" onclick="dashTab('vendas')">Meus anúncios</button>
-      <button id="dt-saques" onclick="dashTab('saques')">Vendas & Saque</button>
+      <button id="dt-minhas-vendas" onclick="dashTab('minhas-vendas')">Minhas vendas</button>
+      <button id="dt-saques" onclick="dashTab('saques')">Carteira</button>
       <button id="dt-favoritos" onclick="dashTab('favoritos')">Favoritos</button>
     </div>
     <div class="dbody" id="dashBody"></div>
@@ -933,7 +934,7 @@ function scheduleStages(id,pending){
 
 /* ===== PAINEL ===== */
 function openDash(t){if(!requireAuth())return;openModal('dashModal');dashTab(t||'compras')}
-function dashTab(t){['compras','vendas','saques','favoritos'].forEach(function(x){$('#dt-'+x).classList.toggle('on',x===t)});if(t==='compras')renderOrders();if(t==='vendas')renderSales();if(t==='saques')renderSaques();if(t==='favoritos')renderFavs()}
+function dashTab(t){['compras','vendas','minhas-vendas','saques','favoritos'].forEach(function(x){$('#dt-'+x).classList.toggle('on',x===t)});if(t==='compras')renderOrders();if(t==='vendas')renderMeusAnuncios();if(t==='minhas-vendas')renderMinhasVendas();if(t==='saques')renderCarteira();if(t==='favoritos')renderFavs()}
 var TL=['Pagamento','Análise','Entrega','Conclusão']
 async function renderOrders(){
   var box=$('#dashBody')
@@ -954,24 +955,56 @@ async function renderOrders(){
     return '<div class="order"><div class="ohead"><b>'+esc(o.titulo)+'</b><small>'+new Date(o.criado_em).toLocaleDateString('pt-BR')+' · '+esc(o.metodo)+'</small><span class="ostatus s'+st+'">'+stTxt+'</span></div><ol class="tl">'+tl+'</ol><div class="oitems"><span style="font-weight:700">'+fmt(o.valor)+'</span></div>'+creds+(acts?'<div>'+acts+'</div>':'')+'</div>'
   }).join('')
 }
-async function renderSales
-  (){
+async function renderMeusAnuncios(){
   var box=$('#dashBody')
   if(!SB_OK){box.innerHTML='<p style="color:var(--mut)">Ative o Supabase para ver seus anúncios.</p>';return}
   var r=await sb.from('listings').select('*').eq('seller',user.id).order('criado_em',{ascending:false})
   var list=r.data||[]
   if(!list.length){box.innerHTML='<div class="empty">'+icon('tag')+'<h3>Nenhum anúncio ainda</h3><br><button class="btn btn-ink" onclick="closeModal(\'dashModal\');openSell()">Criar primeiro anúncio</button></div>';return}
-  box.innerHTML=list.map(function(l){return '<div class="sale"><img src="'+(CATIMG[l.categoria]||IMG.tt)+'"><div><b>'+esc(l.titulo)+'</b><small>'+fmt(l.preco)+' · <span style="color:var(--ok);font-weight:700">● Ativo</span></small></div><div class="acts"><button class="btn btn-ghost" style="padding:8px 12px;font-size:12px" onclick="closeModal(\'dashModal\');openProduct(\''+l.id+'\')">Ver</button><button class="btn btn-ghost" style="padding:8px 12px;font-size:12px;color:var(--err)" onclick="removeListing(\''+l.id+'\')">'+icon('trash')+'</button></div></div>'}).join('')
+  box.innerHTML=list.map(function(l){
+    var statusBadge=l.status==='ativo'?'<span style="color:var(--ok);font-weight:700">● Ativo</span>':l.status==='vendido'?'<span style="color:var(--warn);font-weight:700">● Vendido</span>':'<span style="color:var(--err);font-weight:700">● Removido</span>'
+    var canEdit=l.status==='ativo'
+    return '<div class="sale"><img src="'+(CATIMG[l.categoria]||IMG.tt)+'"><div><b>'+esc(l.titulo)+'</b><small>'+fmt(l.preco)+' · '+statusBadge+'</small></div><div class="acts">'+(canEdit?'<button class="btn btn-ghost" style="padding:8px 12px;font-size:12px" onclick="closeModal(\'dashModal\');openProduct(\''+l.id+'\')">Ver</button>':'<button class="btn btn-ghost" style="padding:8px 12px;font-size:12px" disabled>Vendido</button>')+'<button class="btn btn-ghost" style="padding:8px 12px;font-size:12px;color:var(--err)" onclick="removeListing(\''+l.id+'\')">'+icon('trash')+'</button></div></div>'}).join('')
 }
-async function removeListing(id){await sb.from('listings').delete().eq('id',id);toast('Anúncio removido','warn');loadProducts();renderSales()}
-async function renderSaques(){
+async function removeListing(id){await sb.from('listings').delete().eq('id',id);toast('Anúncio removido','warn');loadProducts();renderMeusAnuncios()}
+
+// FASE 2: Minhas Vendas (pedidos das minhas listings) e Carteira com saldo disponível/pendente
+async function renderMinhasVendas(){
+  var box=$('#dashBody')
+  if(!SB_OK){box.innerHTML='<p style="color:var(--mut)">Ative o Supabase para ver suas vendas.</p>';return}
+  // Busca todas as minhas listings
+  var rList=await sb.from('listings').select('id').eq('seller',user.id)
+  var minhasListingIds=(rList.data||[]).map(function(l){return l.id})
+  if(!minhasListingIds.length){box.innerHTML='<div class="empty">'+icon('cart')+'<h3>Nenhuma venda ainda</h3></div>';return}
+  // Busca pedidos dessas listings
+  var rOrders=await sb.from('orders').select('*,listing_id').in('listing_id',minhasListingIds).order('criado_em',{ascending:false})
+  var list=rOrders.data||[]
+  if(!list.length){box.innerHTML='<div class="empty">'+icon('cart')+'<h3>Nenhuma venda ainda</h3></div>';return}
+  box.innerHTML=list.map(function(o){
+    var minhaParte=(o.valor_item||o.valor)*0.9
+    var statusChip=o.status==='pago'?'<span class="fchip on" style="cursor:default">Aguardando entrega (pendente)</span>':o.status==='entregue'?'<span class="fchip on" style="background:var(--ok-soft);border-color:var(--ok);color:var(--ok)">Liberado</span>':o.status==='disputa'?'<span class="fchip on" style="background:var(--warn-soft);border-color:var(--warn);color:var(--warn)">Em disputa</span>':'<span class="fchip">'+o.status+'</span>'
+    return '<div class="order"><div class="ohead"><b>'+esc(o.titulo)+'</b><small>'+new Date(o.criado_em).toLocaleDateString('pt-BR')+'</small>'+statusChip+'</div><div class="oitems"><span style="font-weight:700">Valor: '+fmt(o.valor_item||o.valor)+'</span><br><small>Minha parte (90%): <b style="color:var(--ok)">'+fmt(minhaParte)+'</b></small></div></div>'
+  }).join('')
+}
+
+async function renderCarteira(){
   await loadProfile()
   var r=await sb.from('withdrawals').select('*').eq('seller',user.id).order('criado_em',{ascending:false})
   var list=r.data||[]
-  $('#dashBody').innerHTML='<div class="walbal"><small>SALDO DE VENDEDOR (90% DAS VENDAS)</small><b>'+fmt((profile&&profile.saldo)||0)+'</b></div>'+
-   '<div class="form-grid"><div class="full"><label>Chave PIX</label><input id="saqKey" placeholder="CPF, e-mail ou celular"></div><div class="full"><label>Valor (R$)</label><input id="saqVal" type="number"></div></div>'+
-   '<button class="btn btn-ink" style="width:100%;margin-top:12px" onclick="requestSaque()">'+icon('wallet')+' Solicitar saque</button>'+
-   '<div class="gnote">💡 O saldo entra sozinho quando suas contas são vendidas. Saque pago via PIX em até 24h úteis.</div>'+
+  // Calcula saldo pendente (vendas pagas ou em disputa não entregues ainda)
+  var rList=await sb.from('listings').select('id').eq('seller',user.id)
+  var minhasListingIds=(rList.data||[]).map(function(l){return l.id})
+  var pendente=0
+  if(minhasListingIds.length){
+    var rPend=await sb.from('orders').select('valor_item').in('listing_id',minhasListingIds).in('status',['pago','disputa'])
+    pendente=(rPend.data||[]).reduce(function(sum,o){return sum+(o.valor_item||0)*0.9},0)
+  }
+  var saldoDisponivel=(profile&&profile.saldo)||0
+  $('#dashBody').innerHTML='<div class="walbal"><small>SALDO DISPONÍVEL (já liberado)</small><b id="wSaldoDisp">'+fmt(saldoDisponivel)+'</b></div>'+\
+   '<div class="walbal" style="margin-top:10px;background:var(--warn-soft);border:1px solid var(--warn-line)"><small>SALDO PENDENTE (aguardando entrega/disputa)</small><b id="wSaldoPend" style="color:var(--warn)">'+fmt(pendente)+'</b></div>'+\
+   '<div class="form-grid" style="margin-top:16px"><div class="full"><label>Chave PIX</label><input id="saqKey" placeholder="CPF, e-mail ou celular"></div><div class="full"><label>Valor (R$)</label><input id="saqVal" type="number"></div></div>'+\
+   '<button class="btn btn-ink" style="width:100%;margin-top:12px" onclick="requestSaque()">'+icon('wallet')+' Solicitar saque</button>'+\
+   '<div class="gnote">💡 O saldo entra sozinho quando suas contas são vendidas. Saque pago via PIX em até 24h úteis.</div>'+\
    '<ul class="txlist" style="margin-top:14px">'+(list.length?list.map(function(w){return '<li><span>'+esc(w.chave_pix)+'</span><b style="color:var(--warn)">'+fmt(w.valor)+' · '+w.status+'</b></li>'}).join(''):'<li style="color:var(--mut)">Nenhum saque ainda</li>')+'</ul>'
 }
 async function requestSaque(){
@@ -983,11 +1016,8 @@ async function requestSaque(){
   if(r.error){toast(r.error.message,'err');return}
   await sb.from('profiles').update({saldo:saldo-v}).eq('id',user.id)
   toast('Saque solicitado! 💸 PIX em até 24h úteis')
-  renderSaques()
+  renderCarteira()
 }
-function renderFavs(){
-  var favs=state.products.filter(function(p){return state.favs[p.id]})
-  $('#dashBody').innerHTML=favs.length?'<div class="pgrid" style="grid-template-columns:repeat(2,1fr)">'+favs.map(buildCard).join('')+'</div>':'<div class="empty">'+icon('heart')+'<h3>Sem favoritos ainda</h3></div>'
 }
 
 /* ===== CARTEIRA DO COMPRADOR ===== */
