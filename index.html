@@ -390,6 +390,7 @@ footer{border-top:1px solid var(--line);background:var(--bg2);padding:52px 0 26p
       </div>
       <div class="hactions">
         <button class="btn btn-ink" onclick="openSell()"><svg class="ic" style="width:15px;height:15px"><use href="#i-plus"/></svg> Anunciar</button>
+        <button id="ownerBtn" class="btn btn-ghost" style="display:none;border-color:var(--accent);color:var(--accent)" onclick="openAdmin()"><svg class="ic"><use href="#i-crown"/></svg> 👑 Dono</button>
         <div class="ddwrap">
           <button class="iconbtn" onclick="toggleBell(event)"><svg class="ic"><use href="#i-bell"/></svg><span class="dot hidden" id="bellDot"></span></button>
           <div class="dropdown" id="bellMenu"><h5>Notificações</h5><div id="bellList"></div></div>
@@ -719,6 +720,8 @@ footer{border-top:1px solid var(--line);background:var(--bg2);padding:52px 0 26p
 var SUPABASE_URL='https://qulgcfdqkugsiqjelact.supabase.co/'
 var SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1bGdjZmRxa3Vnc2lxamVsYWN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0ODc1OTksImV4cCI6MjEwMjA2MzU5OX0.KRD2RQ2KF7hHJjzseSMVG4NJLYBMr8zmPHX5FqWeImA'
 /* ⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️ */
+// ===== CONFIGURAÇÃO DO DONO =====
+var OWNER_EMAIL = 'SEU_EMAIL_AQUI@EXEMPLO.COM' // <-- COLOQUE SEU EMAIL DE DONO AQUI
 var sb=null,SB_OK=false
 try{if(window.supabase&&SUPABASE_URL.indexOf('https://')===0&&SUPABASE_ANON_KEY.length>30){sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);SB_OK=true}}catch(e){SB_OK=false}
 if(!SB_OK){document.body.insertAdjacentHTML('afterbegin','<div style="background:#F6EDDA;color:#7A5B1E;text-align:center;padding:10px;font-size:13px;font-weight:600">⚠️ Modo demo: cole suas chaves do Supabase no código (Ctrl+F: COLE_SUA_URL_AQUI)</div>')}
@@ -769,11 +772,15 @@ function initials(n){return (n||'U').split(' ').map(function(x){return x[0]}).sl
 function updateUserUI(){
   var btn=$('#userBtn'),menu=$('#userMenu')
   document.body.classList.toggle('logged',!!user)
+  // Mostrar botão do dono se email bater
+  var isOwner = user && user.email === OWNER_EMAIL
+  $('#ownerBtn').style.display = isOwner ? 'inline-flex' : 'none'
   if(user){btn.textContent=initials(profile&&profile.nome);
     menu.innerHTML='<div style="padding:10px;border-bottom:1px dashed var(--line);margin-bottom:8px"><p style="font-weight:700">'+esc(profile&&profile.nome||'')+'</p><small style="color:var(--mut)">'+esc(user.email)+'</small></div>'+
     '<div class="dd-item" onclick="closeDDs();openDash(\'compras\')">'+icon('cart')+'<p>Minhas compras</p></div>'+
     '<div class="dd-item" onclick="closeDDs();openDash(\'vendas\')">'+icon('tag')+'<p>Meus anúncios</p></div>'+
     '<div class="dd-item" onclick="closeDDs();openDash(\'saques\')">'+icon('wallet')+'<p>Carteira & Saque</p></div>'+
+    (isOwner?'<div class="dd-item" onclick="closeDDs();openAdmin()">'+icon('crown')+'<p>Painel do Dono 👑</p></div>':'')+
     '<div class="dd-item" onclick="closeDDs();logout()">'+icon('x')+'<p>Sair</p></div>'
   }else{btn.innerHTML=icon('user');btn.style.background='var(--bg2)';
     menu.innerHTML='<div class="dd-item" onclick="closeDDs();openAuth(\'login\')">'+icon('user')+'<p>Entrar</p></div><div class="dd-item" onclick="closeDDs();openAuth(\'reg\')">'+icon('plus')+'<p>Criar conta grátis</p></div>'}
