@@ -1,4 +1,25 @@
 export default async function handler(req, res) {
+  // ===== RAIO-X: abra o link no navegador pra ver o diagnóstico =====
+  if (req.method === 'GET') {
+    const t = process.env.MP_ACCESS_TOKEN || ''
+    let mp = null
+    if (t) {
+      const r = await fetch('https://api.mercadopago.com/users/me', {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      mp = await r.json().catch(function () { return null })
+    }
+    res.json({
+      tokenConfigurado: t.length > 10,
+      inicioDoToken: t.slice(0, 12) + '...',
+      contaMP: mp && mp.id
+        ? { id: mp.id, email: mp.email, pais: mp.site_id, status: mp.status }
+        : 'TOKEN INVALIDO OU AUSENTE'
+    })
+    return
+  }
+
+  // ===== CRIAR PAGAMENTO PIX =====
   const { valor, email, orderId } = req.body || {}
 
   const r = await fetch('https://api.mercadopago.com/v1/payments', {
@@ -18,7 +39,9 @@ export default async function handler(req, res) {
   })
 
   const d = await r.json()
-  if (!d.point_of_interaction) return res.status(400).json({ erro: d })
+  if (!d.point_of_interaction) {
+    return res.status(400).json({ erro: d.message || d.error || JSON.stringify(d) })
+  }
 
   res.json({
     id: d.id,
